@@ -2,7 +2,9 @@
 *.o
 *.obj
 
-# Target Executable
+# Executables
+*.exe
+*.out
 job_scheduler
 
 # Operating System temporary files
