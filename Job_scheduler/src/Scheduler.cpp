@@ -27,12 +27,17 @@ bool Scheduler::hasReadyJobs() const {
 
 // Retrieve and remove the highest-priority ready job
 std::shared_ptr<Job> Scheduler::popNextReadyJob() {
-    if (readyQueue.empty()) {
-        return nullptr;
+    while (!readyQueue.empty()) {
+        std::shared_ptr<Job> nextJob = readyQueue.top();
+        readyQueue.pop();
+        
+        // Only return the job if it is still in the READY state 
+        // (discards jobs that failed due to deadlines while in the queue)
+        if (nextJob && nextJob->getState() == JobState::READY) {
+            return nextJob;
+        }
     }
-    std::shared_ptr<Job> nextJob = readyQueue.top();
-    readyQueue.pop();
-    return nextJob;
+    return nullptr;
 }
 
 // Decrements dependencies and moves newly freed jobs to the ready queue

@@ -6,6 +6,40 @@
 #include <iostream>
 #include <string>
 
+// Helper function
+static void failJobAndDependents(const std::string& jobId, 
+                                 DependencyGraph& graph, 
+                                 std::vector<Worker>& workers) {
+    std::shared_ptr<Job> job = graph.getJob(jobId);
+    if (!job || job->getState() == JobState::FAILED || job->getState() == JobState::COMPLETED) {
+        return;
+    }
+
+    Logger::log(LogLevel::WARNING, "Job [" + jobId + "] failed (missed deadline).");
+    job->setState(JobState::FAILED);
+
+    // If a worker is currently busy with this failed job, interrupt and release the worker
+    for (auto& worker : workers) {
+        if (worker.getState() == WorkerState::BUSY && worker.getCurrentJob() && worker.getCurrentJob()->getId() == jobId) {
+            Logger::log(LogLevel::WARNING, "Worker " + std::to_string(worker.getWorkerId()) + " was interrupted from Job [" + jobId + "].");
+            worker.release();
+        }
+    }
+
+    // Recursively fail all dependent jobs
+    const auto& adjList = graph.getAdjList();
+    auto it = adjList.find(jobId);
+    if (it != adjList.end()) {
+        for (const std::string& dependentId : it->second) {
+            std::shared_ptr<Job> depJob = graph.getJob(dependentId);
+            if (depJob && depJob->getState() != JobState::FAILED && depJob->getState() != JobState::COMPLETED) {
+                Logger::log(LogLevel::WARNING, "Cascaded failure: Job [" + dependentId + "] failed because its dependency [" + jobId + "] failed.");
+                failJobAndDependents(dependentId, graph, workers);
+            }
+        }
+    }
+}
+
 ExecutionEngine::ExecutionEngine(int workers, const std::vector<std::shared_ptr<Job>>& jobList) 
     : numWorkers(workers), jobs(jobList) {}
 
@@ -81,7 +115,17 @@ void ExecutionEngine::execute() {
                 }
             }
         }
+
+        // Step C: Check for deadline violations
+        for (const auto& job : jobs) {
+            if (job->getState() != JobState::COMPLETED && job->getState() != JobState::FAILED) {
+                // If the current tick has reached or exceeded the job's deadline, it fails.
+                if (tick >= job->getDeadline()) {
+                    failJobAndDependents(job->getId(), graph, workers);
+                }
+            }
+        }
     }
 
-    Logger::log(LogLevel::INFO, "Simulation finished successfully in " + std::to_string(tick) + " ticks.");
+    Logger::log(LogLevel::INFO, "Simulation finished in " + std::to_string(tick) + " ticks.");
 }
