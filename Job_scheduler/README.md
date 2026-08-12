@@ -85,31 +85,41 @@ Job_scheduler/
 └── main.cpp    
 ```            
 
-[INFO] Booting Execution Engine...
-[INFO] --- Tick 1 ---
-[INFO] Assigned Job [IngestData] to Worker 0
-[INFO] --- Tick 2 ---
-[INFO] Job [IngestData] completed.
-[INFO] --- Tick 3 ---
-[INFO] Assigned Job [ValidateData] to Worker 0
-[INFO] --- Tick 4 ---
-[INFO] Job [ValidateData] completed.
-[INFO] --- Tick 5 ---
-[INFO] Assigned Job [ProcessAnalytics] to Worker 0
-[INFO] Assigned Job [GenerateReport] to Worker 1
-[WARNING] Job [GenerateReport] failed (missed deadline).
-[WARNING] Worker 1 was interrupted from failed Job [GenerateReport].
-[WARNING] Cascaded failure: Job [SendNotification] marked FAILED because dependency [GenerateReport] failed.
-[INFO] --- Tick 6 ---
-[INFO] --- Tick 7 ---
-[INFO] Job [ProcessAnalytics] completed.
-[INFO] Simulation finished in 7 ticks.
+---
 
-========================================================
-Final Simulation Job States:
-========================================================
-Job [IngestData] -> Status: COMPLETED
-Job [ValidateData] -> Status: COMPLETED
-Job [ProcessAnalytics] -> Status: COMPLETED
-Job [GenerateReport] -> Status: FAILED (Deadline Missed)
-Job [SendNotification] -> Status: FAILED (Deadline Missed)
+## 7. Sample Simulation Output
+
+When the example workload is executed, the scheduler logs state transitions and deadline evaluations through a structured chronology.
+
+- **Engine Initialization:** 
+  - The scheduler successfully boots up.
+- **Tick 1:** 
+  - `IngestData` (no dependencies) is identified as ready and assigned to **Worker 0**.
+- **Tick 2:** 
+  - `IngestData` continues executing on **Worker 0**.
+- **Tick 3:** 
+  - `IngestData` completes execution.
+  - The scheduler unblocks `ValidateData` because its dependencies are now satisfied.
+  - `ValidateData` is assigned to **Worker 0**.
+- **Tick 4:** 
+  - `ValidateData` continues executing on **Worker 0**.
+- **Tick 5:**
+  - `ValidateData` completes execution.
+  - The scheduler unblocks both `ProcessAnalytics` (Priority 9) and `GenerateReport` (Priority 1).
+  - `ProcessAnalytics` is assigned to **Worker 0**.
+  - `GenerateReport` is assigned to **Worker 1**.
+  - **Deadline Check:** The current tick ($5$) reaches the deadline limit ($5$) for `GenerateReport` while the job is still incomplete. 
+  - `GenerateReport` **fails** due to a missed deadline. **Worker 1** is immediately interrupted and freed.
+  - **Cascading Failure:** `SendNotification` (which depends on `GenerateReport`) is automatically transitioned to the **FAILED** state.
+- **Tick 6:** 
+  - `ProcessAnalytics` continues executing on **Worker 0**.
+- **Tick 7:** 
+  - `ProcessAnalytics` completes execution.
+  - The simulation successfully terminates because all jobs have reached a final status.
+
+### Summary of Final Job States
+- 🟢 **Job [IngestData]:** COMPLETED (Successfully completed in 2 ticks)
+- 🟢 **Job [ValidateData]:** COMPLETED (Successfully completed in 2 ticks)
+- 🟢 **Job [ProcessAnalytics]:** COMPLETED (Successfully completed in 3 ticks)
+- 🔴 **Job [GenerateReport]:** FAILED (Terminated on Tick 5 for exceeding its deadline)
+- 🔴 **Job [SendNotification]:** FAILED (Aborted; prerequisite dependency failed)
