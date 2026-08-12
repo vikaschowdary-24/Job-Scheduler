@@ -1,57 +1,114 @@
-# Single-Threaded Job Scheduler with Dependencies and Deadlines
+# Deterministic Job Scheduler Simulation
 
-This project is a single-threaded, tick-based job scheduler simulation written in C++. It manages and executes jobs with priority constraints, directed dependencies (using a Directed Acyclic Graph), and absolute deadlines. 
+This project is a tick-based simulation of a job scheduler and execution engine. It models how an operating system or a workflow engine manages task dependencies, priorities, resource limits (workers), and execution deadlines.
 
-The scheduler runs entirely on a single thread using a simulated clock ("ticks") to model execution, avoiding the complexity and overhead of multithreading.
-
----
-
-## Features
-
-- **Single-Threaded Tick Simulation:** Simulates discrete time slices (ticks) to advance job execution.
-- **Dependency Management:** Uses a Directed Acyclic Graph (DAG) and Kahn's Algorithm to detect circular dependencies (deadlocks) before the simulation starts.
-- **Priority-Based Scheduling:** Selects ready jobs using a priority queue (max-priority based on job priority values).
-- **Deadline Enforcement:** Evaluates active jobs against their absolute deadline tick.
-- **Cascading Failures:** If a job misses its deadline, the engine automatically fails it, preempts the worker running it, and transitively marks all its dependent jobs as failed to prevent system hang-ups.
+The scheduler utilizes a simulated virtual clock ("ticks") to model and control execution states deterministically.
 
 ---
 
-## File Structure
+## 1. Project Overview
 
-The project consists of the following components:
+The system simulates a set of compute **Workers** executing a Directed Acyclic Graph (DAG) of **Jobs**. The scheduler uses a virtual clock measured in **ticks** to step through execution, ensuring reproducible and predictable scheduling behavior.
 
-| Component | Files | Description |
-| :--- | :--- | :--- |
-| **Types** | `Types.h` | Defines states for jobs (`BLOCKED`, `READY`, `RUNNING`, `COMPLETED`, `FAILED`) and workers (`IDLE`, `BUSY`). |
-| **Job** | `Job.h`, `Job.cpp` | Represents an individual task, tracking its ID, remaining execution duration, priority, deadline, and dependencies. |
-| **Worker** | `Worker.h`, `Worker.cpp` | Models a processing unit that executes a job tick-by-tick. |
-| **Dependency Graph** | `DependencyGraph.h`, `DependencyGraph.cpp` | Tracks in-degrees and adjacency lists of jobs. Performs cycle detection. |
-| **Scheduler** | `Scheduler.h`, `Scheduler.cpp` | Manages the `READY` priority queue and updates the state of dependent jobs when their blockers complete. |
-| **Execution Engine** | `ExecutionEngine.h`, `ExecutionEngine.cpp` | Drives the main simulation loop, processes worker execution, maps ready jobs to idle workers, and handles deadline checks. |
-| **Logger** | `Logger.h`, `Logger.cpp` | Provides formatted outputs (`INFO`, `WARNING`, `ERROR`) to trace execution state. |
+### Key Capabilities
+- **Dependency Resolution:** Jobs are held in a `BLOCKED` state until all their parent dependencies are `COMPLETED`.
+- **Priority-Based Dispatching:** When multiple jobs are `READY`, the scheduler uses a max-priority queue to assign the highest-priority jobs first.
+- **Resource Constraints:** The simulation restricts execution to a fixed number of workers. If all workers are `BUSY`, ready jobs remain in the queue.
+- **Deadlock Prevention:** Pre-execution checks utilize Kahn's Algorithm to detect circular dependencies and abort the engine if a deadlock is present.
+- **SLA/Deadline Tracking:** Jobs that do not finish before their specified deadline are failed, releasing their assigned worker and transitively failing any downstream dependent jobs (cascading failures).
 
 ---
 
-## How the Deadline Logic Works
+## 2. Core Concepts & States
 
-A job's `deadline` represents the absolute tick number by which the job must have transitioned to the `COMPLETED` state. 
+### Job States
+A job transitions through the following lifecycle states during the simulation:
+- **`BLOCKED`**: The job has unfinished dependencies and cannot run yet.
+- **`READY`**: All dependencies are met. The job is in the scheduler's priority queue waiting for an idle worker.
+- **`RUNNING`**: The job is assigned to a worker and is decrementing its remaining execution time tick-by-tick.
+- **`COMPLETED`**: The job has successfully finished execution.
+- **`FAILED`**: The job exceeded its absolute deadline and was terminated.
 
-### Simulation Loop Sequence Per Tick:
-1. **Step A (Process busy workers):** Active workers decrement the remaining duration of their assigned jobs. Jobs finishing on this step transition to `COMPLETED`, releasing the worker and notifying the scheduler to unblock dependent tasks.
-2. **Step B (Assign jobs):** The scheduler assigns available `READY` jobs to `IDLE` workers. Newly assigned jobs transition to `RUNNING` but do not receive execution time until Step A of the *next* tick.
-3. **Step C (Check deadlines):** For any job that is not `COMPLETED` or `FAILED`, if the current $\text{tick} \ge \text{deadline}$, the job is marked `FAILED`.
-
-### Cascading Failure Resolution
-If a job fails at Step C:
-- If a worker is currently executing it, the worker is immediately interrupted and set to `IDLE`.
-- The engine recursively traverses the dependency graph and marks all jobs depending on the failed job as `FAILED` (since their dependencies can now never be completed).
-- Any failed jobs waiting in the scheduler's priority queue are discarded when popped.
+### Worker States
+- **`IDLE`**: The worker has no assigned task and is ready to accept a job.
+- **`BUSY`**: The worker is executing a job.
 
 ---
 
-## Compilation and Execution
+## 3. System Architecture & Components
 
-To compile the project, place all `.h` and `.cpp` files in the same directory and compile using a C++11 compatible compiler (such as `g++`):
+The project is structured into modular components:
 
-```bash
-g++ -std=c++11 -Wall -O2 main.cpp Job.cpp Worker.cpp DependencyGraph.cpp Scheduler.cpp ExecutionEngine.cpp Logger.cpp -o scheduler_sim
+### A. Dependency Graph (`DependencyGraph`)
+Represents the relationship between jobs as a directed graph.
+- Calculates the "in-degree" (count of unmet dependencies) for each job.
+- Builds an adjacency list to track downstream jobs.
+- Implements Kahn's Algorithm to verify that the graph contains no cycles before processing begins.
+
+### B. Scheduler (`Scheduler`)
+Responsible for managing ready tasks.
+- Maintains a max-priority queue using a custom comparator (`JobComparator`) based on the job's priority integer.
+- Monitors when jobs complete and decrements the dependency counts of downstream jobs, transitioning them to `READY` when their in-degree reaches zero.
+
+### C. Worker (`Worker`)
+Acts as a virtual CPU core.
+- Holds a reference to a single running job.
+- Processes execution on each simulation tick, reducing the job's remaining run time.
+
+### D. Execution Engine (`ExecutionEngine`)
+Drives the core simulation loop. Each loop iteration represents one virtual time unit (Tick):
+1. **Step A (Execution):** Ticks all busy workers. If a job's remaining time reaches 0, it transitions to `COMPLETED`, freeing the worker and updating the scheduler.
+2. **Step B (Scheduling):** Identifies idle workers and assigns them the highest-priority jobs popped from the scheduler's ready queue.
+3. **Step C (Monitoring):** Scans all non-completed jobs. If `tick >= job->getDeadline()`, the job fails. Its worker is released, and its downstream dependent jobs are recursively marked `FAILED`.
+
+---
+
+## 4. File Structure
+
+```text
+Job_scheduler/
+├── include/
+│   ├── DependencyGraph.h   # Graph definition and cycle detection
+│   ├── ExecutionEngine.h   # Core simulation loop driver
+│   ├── Job.h               # Job structure, states, and properties
+│   ├── Logger.h            # Static logger helper
+│   ├── Scheduler.h         # Priority queue and dependency tracker
+│   ├── Types.h             # Shared Enums (JobState, WorkerState, LogLevel)
+│   └── Worker.h            # Worker processing class
+├── src/
+│   ├── DependencyGraph.cpp
+│   ├── ExecutionEngine.cpp
+│   ├── Job.cpp
+│   ├── Logger.cpp
+│   ├── Scheduler.cpp
+│   └── Worker.cpp
+└── main.cpp                
+
+[INFO] Booting Execution Engine...
+[INFO] --- Tick 1 ---
+[INFO] Assigned Job [IngestData] to Worker 0
+[INFO] --- Tick 2 ---
+[INFO] Job [IngestData] completed.
+[INFO] --- Tick 3 ---
+[INFO] Assigned Job [ValidateData] to Worker 0
+[INFO] --- Tick 4 ---
+[INFO] Job [ValidateData] completed.
+[INFO] --- Tick 5 ---
+[INFO] Assigned Job [ProcessAnalytics] to Worker 0
+[INFO] Assigned Job [GenerateReport] to Worker 1
+[WARNING] Job [GenerateReport] failed (missed deadline).
+[WARNING] Worker 1 was interrupted from failed Job [GenerateReport].
+[WARNING] Cascaded failure: Job [SendNotification] marked FAILED because dependency [GenerateReport] failed.
+[INFO] --- Tick 6 ---
+[INFO] --- Tick 7 ---
+[INFO] Job [ProcessAnalytics] completed.
+[INFO] Simulation finished in 7 ticks.
+
+========================================================
+Final Simulation Job States:
+========================================================
+Job [IngestData] -> Status: COMPLETED
+Job [ValidateData] -> Status: COMPLETED
+Job [ProcessAnalytics] -> Status: COMPLETED
+Job [GenerateReport] -> Status: FAILED (Deadline Missed)
+Job [SendNotification] -> Status: FAILED (Deadline Missed)
